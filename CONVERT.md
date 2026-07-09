@@ -10,7 +10,7 @@ Copy the prompt below and paste it into any AI coding tool (Claude Code, Cursor,
 
 ```
 You are converting THIS repository to the AI-ready monorepo template structure.
-Source template: https://github.com/haseeb-uney/ai-monorepo-template
+Source template: https://github.com/SyntaxWay/agent-ready-repo
 
 Work through the phases below in order. After Phase 2, pause and show me a summary before continuing.
 
@@ -221,7 +221,7 @@ If a file exists but is just a placeholder, update it with real content from Pha
 
 docs/GLOSSARY.md
   ─ table of domain terms (every noun from the DB schema / API), invariants, naming traps
-  ─ template: https://github.com/haseeb-uney/ai-monorepo-template/blob/main/docs/GLOSSARY.md
+  ─ template: https://github.com/SyntaxWay/agent-ready-repo/blob/main/docs/GLOSSARY.md
 
 docs/architecture/system-overview.md
   ─ C4-style overview: what the system is, its major components, how data flows
@@ -273,7 +273,7 @@ an LLM — no human or local agent should ever write to these files directly.
 
 Step 1: Copy the docs-sync workflow into this repo.
   Create .github/workflows/docs-sync.yml with this content:
-  https://github.com/haseeb-uney/ai-monorepo-template/blob/main/.github/workflows/docs-sync.yml
+  https://github.com/SyntaxWay/agent-ready-repo/blob/main/.github/workflows/docs-sync.yml
 
 Step 2: Add LLM credentials to GitHub Secrets.
   GitHub repo → Settings → Secrets and variables → Actions → New secret

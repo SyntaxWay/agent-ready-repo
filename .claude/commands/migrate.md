@@ -1,5 +1,5 @@
 You are converting THIS repository to the AI-ready monorepo template structure.
-Source template: https://github.com/haseeb-uney/ai-monorepo-template
+Source template: https://github.com/SyntaxWay/agent-ready-repo
 
 Work through the phases below in order. After Phase 2, pause and show me a summary before continuing.
 
@@ -261,7 +261,7 @@ an LLM — no human or local agent should ever write to these files directly.
 
 Step 1: Copy the docs-sync workflow into this repo.
   Create .github/workflows/docs-sync.yml with this content:
-  https://github.com/haseeb-uney/ai-monorepo-template/blob/main/.github/workflows/docs-sync.yml
+  https://github.com/SyntaxWay/agent-ready-repo/blob/main/.github/workflows/docs-sync.yml
 
 Step 2: Add LLM credentials to GitHub Secrets.
   GitHub repo → Settings → Secrets and variables → Actions → New secret
