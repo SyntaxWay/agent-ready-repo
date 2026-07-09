@@ -1,14 +1,1 @@
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"additionalContext\": \"BEFORE STOPPING — doc sync check: Did you change any non-documentation files this session (source code, configs, scripts, commands)? If yes, verify these docs still reflect reality and update them if not:\\n- AGENTS.md — commands, hard rules, monorepo map\\n- docs/architecture/ — system structure or data flow\\n- docs/guides/ — how-to recipes\\n- docs/GLOSSARY.md — domain terms or invariants\\nIf the docs are already up to date, or you only changed docs this session, stop immediately without further edits.\"}}'"
-          }
-        ]
-      }
-    ]
-  }
-}
+{}

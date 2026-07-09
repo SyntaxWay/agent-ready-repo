@@ -252,31 +252,42 @@ Also delete legacy single-file formats replaced by this structure:
   CODEX.md        → obsolete; Codex reads AGENTS.md natively
 
 ─────────────────────────────────────────────
-PHASE 7 — CLAUDE CODE STOP HOOK
+PHASE 7 — AUTOMATED DOCS SYNC (CI PIPELINE)
 ─────────────────────────────────────────────
 
-Only run this phase if Claude Code is in the confirmed tool list.
+AGENTS.md and docs/ are owned by the CI pipeline, not by local agents.
+After this phase, every merge to main automatically updates the docs via
+Claude — no human or local agent should ever write to these files directly.
 
-Create or update .claude/settings.json — merge with existing content, never replace.
+Step 1: Copy the docs-sync workflow into this repo.
+  Create .github/workflows/docs-sync.yml with this content:
+  https://github.com/haseeb-uney/ai-monorepo-template/blob/main/.github/workflows/docs-sync.yml
 
-Add this Stop hook (it injects a doc-sync nudge at the end of every Claude session):
+Step 2: Add the API key to GitHub Secrets.
+  GitHub repo → Settings → Secrets and variables → Actions → New secret
+  Name:  ANTHROPIC_API_KEY
+  Value: your key from console.anthropic.com/settings/keys
 
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"additionalContext\": \"BEFORE STOPPING — doc sync check: Did you change any non-documentation files this session (source code, configs, scripts, commands)? If yes, verify these docs still reflect reality and update them if not:\\n- AGENTS.md — commands, hard rules, monorepo map\\n- docs/architecture/ — system structure or data flow\\n- docs/guides/ — how-to recipes\\n- docs/GLOSSARY.md — domain terms or invariants\\nIf the docs are already up to date, or you only changed docs this session, stop immediately without further edits.\"}}'"
-          }
-        ]
-      }
-    ]
-  }
-}
+Step 3: Allow Actions to push back to main.
+  GitHub repo → Settings → Actions → General → Workflow permissions
+  → Select "Read and write permissions" → Save
 
-Add .claude/settings.local.json to .gitignore if not already present.
+Step 4: Add this read-only notice to the top of AGENTS.md (after the title line,
+  before Section 1):
+
+  > ⚠️  Auto-maintained by CI (docs-sync workflow). Do not edit manually.
+  > Local agents: read this file and act on its instructions. Never write to it.
+  > All doc updates flow through the main branch pipeline only.
+
+Step 5: Ensure .claude/settings.json does NOT contain a Stop hook for docs.
+  Local Claude Code sessions must be read-only with respect to AGENTS.md and docs/.
+  If a Stop hook exists, remove it. The correct .claude/settings.json is just: {}
+
+Step 6 (optional — recommended for teams): Protect docs from accidental human edits.
+  Create .github/CODEOWNERS:
+    AGENTS.md    @your-bot-or-maintainer-account
+    docs/        @your-bot-or-maintainer-account
+  This requires a review from the named account on any PR that touches these paths.
 
 ─────────────────────────────────────────────
 PHASE 8 — SUMMARY REPORT

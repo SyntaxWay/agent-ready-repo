@@ -1,0 +1,224 @@
+name: Docs Sync
+
+# Runs after every merge to main. Calls Claude to review what changed and
+# update AGENTS.md / docs/ if needed. Commits the result back to main.
+#
+# Setup required:
+#   1. Add ANTHROPIC_API_KEY to GitHub → Settings → Secrets → Actions
+#   2. Ensure main branch allows GitHub Actions to push (Settings → Actions → Workflow permissions → Read and write)
+#
+# Cost: one Claude API call per merge. Calls are skipped when only
+# documentation files changed. Token usage is printed in the workflow log.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync docs with Claude
+    runs-on: ubuntu-latest
+    # Prevent the bot's own doc-sync commits from re-triggering this workflow
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need HEAD~1 to diff against
+
+      # ── Step 1: decide whether to run ────────────────────────────────
+      - name: Check for non-doc changes
+        id: check
+        run: |
+          changed=$(git diff --name-only HEAD~1 HEAD \
+            | grep -vE '^(AGENTS\.md$|docs/|\.github/|.*\.md$|.*\.txt$|.*\.rst$)' \
+            || true)
+
+          if [[ -z "$changed" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Only docs/config files changed — no API call needed."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Non-doc changes detected:"
+            echo "$changed"
+          fi
+
+      # ── Step 2: collect context ───────────────────────────────────────
+      - name: Collect diff and current docs
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          # Diff of what changed (capped to keep prompt size reasonable)
+          git diff HEAD~1 HEAD | head -c 14000 > /tmp/code.diff
+
+          # Source commit metadata
+          git log -1 --pretty="%h — %s" HEAD~1 > /tmp/commit.txt
+
+          # Current docs
+          cp AGENTS.md                          /tmp/agents.md  2>/dev/null || touch /tmp/agents.md
+          cp docs/GLOSSARY.md                   /tmp/glossary.md 2>/dev/null || touch /tmp/glossary.md
+          cp docs/architecture/system-overview.md /tmp/overview.md 2>/dev/null || touch /tmp/overview.md
+
+      # ── Step 3: build API payload ─────────────────────────────────────
+      - name: Build Claude API payload
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          python3 << 'PYEOF'
+          import json
+
+          diff     = open('/tmp/code.diff').read()
+          commit   = open('/tmp/commit.txt').read().strip()
+          agents   = open('/tmp/agents.md').read()
+          glossary = open('/tmp/glossary.md').read()
+          overview = open('/tmp/overview.md').read()
+
+          system = (
+              "You are an automated documentation maintainer for a software project. "
+              "You receive a git diff and the current documentation files. "
+              "You return updated versions of any files that need changing. "
+              "Rules:\n"
+              "- Be conservative. Only update when the diff shows a meaningful change "
+              "  to commands, project structure, domain terms, or architectural rules.\n"
+              "- Never change content that is still accurate.\n"
+              "- Preserve existing formatting, section order, and tone exactly.\n"
+              "- If nothing needs updating (bug fix, refactor, test-only, style, "
+              "  dependency bump with no API change), return the single word SKIP."
+          )
+
+          user = f"""Source commit: {commit}
+
+          Git diff of this merge:
+          <diff>
+          {diff}
+          </diff>
+
+          Current AGENTS.md:
+          <agents_md>
+          {agents}
+          </agents_md>
+
+          Current docs/GLOSSARY.md:
+          <glossary>
+          {glossary}
+          </glossary>
+
+          Current docs/architecture/system-overview.md:
+          <overview>
+          {overview}
+          </overview>
+
+          Update these files only when the diff makes their content inaccurate:
+
+          AGENTS.md §2 (Monorepo Map)        — new or removed apps / packages / dirs
+          AGENTS.md §3 (Golden Commands)     — scripts or CLI commands changed
+          AGENTS.md §4 (Tech Stack)          — dependencies or runtime versions changed
+          AGENTS.md §5 (Hard Rules)          — new constraints implied by the change
+          docs/GLOSSARY.md                   — new domain terms, entities, or invariants
+          docs/architecture/system-overview.md — structural topology changes
+
+          Return format (one block per file that needs updating):
+
+          FILE: AGENTS.md
+          <complete updated file content>
+          ---END---
+          FILE: docs/GLOSSARY.md
+          <complete updated file content>
+          ---END---
+
+          If no update is needed, return only: SKIP"""
+
+          payload = {
+              "model": "claude-sonnet-5",
+              "max_tokens": 8096,
+              "system": system,
+              "messages": [{"role": "user", "content": user}]
+          }
+
+          with open('/tmp/payload.json', 'w') as f:
+              json.dump(payload, f)
+          print("Payload ready.")
+          PYEOF
+
+      # ── Step 4: call the API ──────────────────────────────────────────
+      - name: Call Claude API
+        if: steps.check.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          curl -sf https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            --data-binary @/tmp/payload.json \
+            -o /tmp/response.json
+
+          # Print token usage so teams can track cost
+          echo "Token usage:"
+          jq '{input: .usage.input_tokens, output: .usage.output_tokens}' /tmp/response.json
+
+      # ── Step 5: parse response and write files ────────────────────────
+      - name: Parse response and write updated docs
+        if: steps.check.outputs.skip == 'false'
+        id: write
+        run: |
+          python3 << 'PYEOF'
+          import json, re, os, sys
+
+          response = json.load(open('/tmp/response.json'))
+
+          if 'error' in response:
+              print("API error:", response['error'])
+              sys.exit(1)
+
+          content = response['content'][0]['text'].strip()
+
+          if content == 'SKIP':
+              print("Claude: no doc update needed for this merge.")
+              open('/tmp/updated', 'w').write('false')
+              sys.exit(0)
+
+          pattern = r'FILE:\s*(.+?)\n(.*?)---END---'
+          matches = re.findall(pattern, content, re.DOTALL)
+
+          if not matches:
+              print("No FILE blocks found. Response preview:")
+              print(content[:400])
+              open('/tmp/updated', 'w').write('false')
+              sys.exit(0)
+
+          for path, body in matches:
+              path = path.strip()
+              dirpath = os.path.dirname(path)
+              if dirpath:
+                  os.makedirs(dirpath, exist_ok=True)
+              with open(path, 'w') as f:
+                  f.write(body.strip() + '\n')
+              print(f"Updated: {path}")
+
+          open('/tmp/updated', 'w').write('true')
+          PYEOF
+
+          echo "updated=$(cat /tmp/updated)" >> "$GITHUB_OUTPUT"
+
+      # ── Step 6: commit back to main ───────────────────────────────────
+      - name: Commit updated docs
+        if: steps.write.outputs.updated == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add AGENTS.md docs/
+
+          if git diff --cached --quiet; then
+            echo "File content unchanged after write — nothing to commit."
+            exit 0
+          fi
+
+          SOURCE=$(git log -1 --pretty="%h — %s" HEAD~1)
+          git commit -m "docs: auto-sync after ${SOURCE}
+
+          Updated by docs-sync workflow. [skip ci]"
+
+          git push
