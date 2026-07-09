@@ -131,24 +131,27 @@ jobs:
             -print0)
           exit "$failed"
 
-      - name: Validate .claude/settings.json hook structure
-        # The Stop hook must be present and correctly nested — a malformed
-        # settings.json silently disables ALL hooks with no error message.
+      - name: Validate .claude/settings.json (no Stop hook for docs)
+        # Docs are maintained by docs-sync.yml (CI pipeline), not by a local
+        # Claude Stop hook. A Stop hook that writes AGENTS.md would race the
+        # CI pipeline. Fail if a Stop hook command touches AGENTS.md or docs/.
         run: |
           f=".claude/settings.json"
           if [[ ! -f "$f" ]]; then
-            echo "No $f — skipping hook validation."
+            echo "No $f — skipping validation."
             exit 0
           fi
-          result=$(jq -r '
+          bad=$(jq -r '
             .hooks.Stop[]?.hooks[]?
             | select(.type == "command")
             | .command
-          ' "$f")
-          if [[ -n "$result" ]]; then
-            echo "✓  Stop hook found in $f"
+            | select(test("AGENTS\\.md|docs/"))
+          ' "$f" || true)
+          if [[ -n "$bad" ]]; then
+            echo "::error file=$f::Stop hook writes to AGENTS.md or docs/ — remove it. Docs are owned by the CI docs-sync pipeline."
+            exit 1
           else
-            echo "::warning file=$f::$f has no Stop hook. Doc-sync automation will not run."
+            echo "✓  No doc-writing Stop hook in $f"
           fi
 
   # ─────────────────────────────────────────────────────────────────────

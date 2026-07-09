@@ -1,14 +1,28 @@
 name: Docs Sync
 
-# Runs after every merge to main. Calls Claude to review what changed and
-# update AGENTS.md / docs/ if needed. Commits the result back to main.
+# Runs after every merge to main. Calls an LLM to review what changed
+# and update AGENTS.md / docs/ if needed. Commits the result back to main.
 #
-# Setup required:
-#   1. Add ANTHROPIC_API_KEY to GitHub → Settings → Secrets → Actions
-#   2. Ensure main branch allows GitHub Actions to push (Settings → Actions → Workflow permissions → Read and write)
+# ── Supported providers (set ONE group of secrets) ───────────────────────
 #
-# Cost: one Claude API call per merge. Calls are skipped when only
-# documentation files changed. Token usage is printed in the workflow log.
+#   Anthropic Claude
+#     ANTHROPIC_API_KEY      your key from console.anthropic.com
+#
+#   Azure OpenAI
+#     AZURE_OPENAI_API_KEY       your key from Azure portal
+#     AZURE_OPENAI_ENDPOINT      e.g. https://my-resource.openai.azure.com
+#     AZURE_OPENAI_DEPLOYMENT    your deployment name, e.g. gpt-4o
+#     AZURE_OPENAI_API_VERSION   (optional) defaults to 2024-08-01-preview
+#
+#   OpenAI
+#     OPENAI_API_KEY         your key from platform.openai.com
+#     OPENAI_MODEL           (optional) defaults to gpt-4o
+#
+# Auto-detection order: Anthropic → Azure OpenAI → OpenAI
+# Set secrets at: GitHub repo → Settings → Secrets and variables → Actions
+#
+# ── One-time repo setup ───────────────────────────────────────────────────
+#   Settings → Actions → General → Workflow permissions → Read and write
 
 on:
   push:
@@ -19,7 +33,7 @@ permissions:
 
 jobs:
   sync:
-    name: Sync docs with Claude
+    name: Sync docs with LLM
     runs-on: ubuntu-latest
     # Prevent the bot's own doc-sync commits from re-triggering this workflow
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
@@ -29,7 +43,7 @@ jobs:
         with:
           fetch-depth: 2  # need HEAD~1 to diff against
 
-      # ── Step 1: decide whether to run ────────────────────────────────
+      # ── Step 1: decide whether to run ─────────────────────────────────
       - name: Check for non-doc changes
         id: check
         run: |
@@ -46,37 +60,46 @@ jobs:
             echo "$changed"
           fi
 
-      # ── Step 2: collect context ───────────────────────────────────────
+      # ── Step 2: collect context ────────────────────────────────────────
       - name: Collect diff and current docs
         if: steps.check.outputs.skip == 'false'
         run: |
-          # Diff of what changed (capped to keep prompt size reasonable)
+          # Cap diff size so we stay well within context limits
           git diff HEAD~1 HEAD | head -c 14000 > /tmp/code.diff
+          git log -1 --pretty="%h — %s" HEAD~1  > /tmp/commit.txt
 
-          # Source commit metadata
-          git log -1 --pretty="%h — %s" HEAD~1 > /tmp/commit.txt
+          cp AGENTS.md                             /tmp/agents.md   2>/dev/null || touch /tmp/agents.md
+          cp docs/GLOSSARY.md                      /tmp/glossary.md 2>/dev/null || touch /tmp/glossary.md
+          cp docs/architecture/system-overview.md  /tmp/overview.md 2>/dev/null || touch /tmp/overview.md
 
-          # Current docs
-          cp AGENTS.md                          /tmp/agents.md  2>/dev/null || touch /tmp/agents.md
-          cp docs/GLOSSARY.md                   /tmp/glossary.md 2>/dev/null || touch /tmp/glossary.md
-          cp docs/architecture/system-overview.md /tmp/overview.md 2>/dev/null || touch /tmp/overview.md
-
-      # ── Step 3: build API payload ─────────────────────────────────────
-      - name: Build Claude API payload
+      # ── Step 3: call LLM (provider auto-detected from secrets) ────────
+      - name: Call LLM API
         if: steps.check.outputs.skip == 'false'
+        env:
+          # Anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Azure OpenAI
+          AZURE_OPENAI_API_KEY:     ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT:    ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT:  ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          # OpenAI
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL:   ${{ secrets.OPENAI_MODEL }}
         run: |
           python3 << 'PYEOF'
-          import json
+          import json, os, sys, urllib.request, urllib.error
 
+          # ── Build shared prompt ────────────────────────────────────────
           diff     = open('/tmp/code.diff').read()
           commit   = open('/tmp/commit.txt').read().strip()
           agents   = open('/tmp/agents.md').read()
           glossary = open('/tmp/glossary.md').read()
           overview = open('/tmp/overview.md').read()
 
-          system = (
+          SYSTEM = (
               "You are an automated documentation maintainer for a software project. "
-              "You receive a git diff and the current documentation files. "
+              "You receive a git diff and current documentation files. "
               "You return updated versions of any files that need changing. "
               "Rules:\n"
               "- Be conservative. Only update when the diff shows a meaningful change "
@@ -87,7 +110,7 @@ jobs:
               "  dependency bump with no API change), return the single word SKIP."
           )
 
-          user = f"""Source commit: {commit}
+          USER = f"""Source commit: {commit}
 
           Git diff of this merge:
           <diff>
@@ -110,16 +133,14 @@ jobs:
           </overview>
 
           Update these files only when the diff makes their content inaccurate:
-
-          AGENTS.md §2 (Monorepo Map)        — new or removed apps / packages / dirs
-          AGENTS.md §3 (Golden Commands)     — scripts or CLI commands changed
-          AGENTS.md §4 (Tech Stack)          — dependencies or runtime versions changed
-          AGENTS.md §5 (Hard Rules)          — new constraints implied by the change
-          docs/GLOSSARY.md                   — new domain terms, entities, or invariants
+          AGENTS.md §2  — new or removed apps / packages / dirs
+          AGENTS.md §3  — scripts or CLI commands changed
+          AGENTS.md §4  — dependencies or runtime versions changed
+          AGENTS.md §5  — new constraints implied by the change
+          docs/GLOSSARY.md                    — new domain terms, entities, invariants
           docs/architecture/system-overview.md — structural topology changes
 
-          Return format (one block per file that needs updating):
-
+          Return format — one block per file that needs updating:
           FILE: AGENTS.md
           <complete updated file content>
           ---END---
@@ -129,53 +150,118 @@ jobs:
 
           If no update is needed, return only: SKIP"""
 
-          payload = {
-              "model": "claude-sonnet-5",
-              "max_tokens": 8096,
-              "system": system,
-              "messages": [{"role": "user", "content": user}]
-          }
+          # ── Detect provider ────────────────────────────────────────────
+          anthropic_key  = os.environ.get('ANTHROPIC_API_KEY',      '').strip()
+          azure_key      = os.environ.get('AZURE_OPENAI_API_KEY',   '').strip()
+          azure_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT',  '').strip()
+          azure_deploy   = os.environ.get('AZURE_OPENAI_DEPLOYMENT','').strip()
+          azure_version  = os.environ.get('AZURE_OPENAI_API_VERSION','2024-08-01-preview').strip()
+          openai_key     = os.environ.get('OPENAI_API_KEY',         '').strip()
+          openai_model   = os.environ.get('OPENAI_MODEL',           'gpt-4o').strip()
 
-          with open('/tmp/payload.json', 'w') as f:
-              json.dump(payload, f)
-          print("Payload ready.")
+          if anthropic_key:
+              provider = 'anthropic'
+          elif azure_key and azure_endpoint and azure_deploy:
+              provider = 'azure_openai'
+          elif openai_key:
+              provider = 'openai'
+          else:
+              print("ERROR: No LLM credentials found in secrets.")
+              print("Set one of: ANTHROPIC_API_KEY | AZURE_OPENAI_API_KEY + ENDPOINT + DEPLOYMENT | OPENAI_API_KEY")
+              sys.exit(1)
+
+          print(f"Provider: {provider}")
+
+          # ── Build provider-specific request ────────────────────────────
+          if provider == 'anthropic':
+              url = 'https://api.anthropic.com/v1/messages'
+              headers = {
+                  'x-api-key':         anthropic_key,
+                  'anthropic-version': '2023-06-01',
+                  'content-type':      'application/json',
+              }
+              body = {
+                  'model':      'claude-sonnet-5',
+                  'max_tokens': 8096,
+                  'system':     SYSTEM,
+                  'messages':   [{'role': 'user', 'content': USER}],
+              }
+
+          elif provider == 'azure_openai':
+              url = (
+                  f"{azure_endpoint.rstrip('/')}/openai/deployments/"
+                  f"{azure_deploy}/chat/completions?api-version={azure_version}"
+              )
+              headers = {
+                  'api-key':      azure_key,
+                  'content-type': 'application/json',
+              }
+              body = {
+                  'max_tokens': 8096,
+                  'messages': [
+                      {'role': 'system', 'content': SYSTEM},
+                      {'role': 'user',   'content': USER},
+                  ],
+              }
+
+          else:  # openai
+              url = 'https://api.openai.com/v1/chat/completions'
+              headers = {
+                  'Authorization': f'Bearer {openai_key}',
+                  'content-type':  'application/json',
+              }
+              body = {
+                  'model':      openai_model,
+                  'max_tokens': 8096,
+                  'messages': [
+                      {'role': 'system', 'content': SYSTEM},
+                      {'role': 'user',   'content': USER},
+                  ],
+              }
+
+          # ── Make request ───────────────────────────────────────────────
+          req = urllib.request.Request(
+              url,
+              data=json.dumps(body).encode(),
+              headers=headers,
+              method='POST',
+          )
+
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  response = json.load(resp)
+          except urllib.error.HTTPError as e:
+              print(f"HTTP {e.code}:", e.read().decode())
+              sys.exit(1)
+
+          # ── Extract text + log token usage ─────────────────────────────
+          if provider == 'anthropic':
+              text  = response['content'][0]['text'].strip()
+              usage = response.get('usage', {})
+              print(f"Tokens — input: {usage.get('input_tokens','?')}, output: {usage.get('output_tokens','?')}")
+          else:
+              text  = response['choices'][0]['message']['content'].strip()
+              usage = response.get('usage', {})
+              print(f"Tokens — prompt: {usage.get('prompt_tokens','?')}, completion: {usage.get('completion_tokens','?')}")
+
+          with open('/tmp/llm_response.txt', 'w') as f:
+              f.write(text)
+
+          print("Response written to /tmp/llm_response.txt")
           PYEOF
 
-      # ── Step 4: call the API ──────────────────────────────────────────
-      - name: Call Claude API
-        if: steps.check.outputs.skip == 'false'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          curl -sf https://api.anthropic.com/v1/messages \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "content-type: application/json" \
-            --data-binary @/tmp/payload.json \
-            -o /tmp/response.json
-
-          # Print token usage so teams can track cost
-          echo "Token usage:"
-          jq '{input: .usage.input_tokens, output: .usage.output_tokens}' /tmp/response.json
-
-      # ── Step 5: parse response and write files ────────────────────────
+      # ── Step 4: parse response and write files ─────────────────────────
       - name: Parse response and write updated docs
         if: steps.check.outputs.skip == 'false'
         id: write
         run: |
           python3 << 'PYEOF'
-          import json, re, os, sys
+          import re, os, sys
 
-          response = json.load(open('/tmp/response.json'))
-
-          if 'error' in response:
-              print("API error:", response['error'])
-              sys.exit(1)
-
-          content = response['content'][0]['text'].strip()
+          content = open('/tmp/llm_response.txt').read().strip()
 
           if content == 'SKIP':
-              print("Claude: no doc update needed for this merge.")
+              print("LLM: no doc update needed for this merge.")
               open('/tmp/updated', 'w').write('false')
               sys.exit(0)
 
@@ -183,7 +269,7 @@ jobs:
           matches = re.findall(pattern, content, re.DOTALL)
 
           if not matches:
-              print("No FILE blocks found. Response preview:")
+              print("No FILE blocks in response. Preview:")
               print(content[:400])
               open('/tmp/updated', 'w').write('false')
               sys.exit(0)
@@ -202,7 +288,7 @@ jobs:
 
           echo "updated=$(cat /tmp/updated)" >> "$GITHUB_OUTPUT"
 
-      # ── Step 6: commit back to main ───────────────────────────────────
+      # ── Step 5: commit back to main ────────────────────────────────────
       - name: Commit updated docs
         if: steps.write.outputs.updated == 'true'
         run: |

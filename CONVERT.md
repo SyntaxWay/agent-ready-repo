@@ -269,16 +269,31 @@ PHASE 7 — AUTOMATED DOCS SYNC (CI PIPELINE)
 
 AGENTS.md and docs/ are owned by the CI pipeline, not by local agents.
 After this phase, every merge to main automatically updates the docs via
-Claude — no human or local agent should ever write to these files directly.
+an LLM — no human or local agent should ever write to these files directly.
 
 Step 1: Copy the docs-sync workflow into this repo.
   Create .github/workflows/docs-sync.yml with this content:
   https://github.com/haseeb-uney/ai-monorepo-template/blob/main/.github/workflows/docs-sync.yml
 
-Step 2: Add the API key to GitHub Secrets.
+Step 2: Add LLM credentials to GitHub Secrets.
   GitHub repo → Settings → Secrets and variables → Actions → New secret
-  Name:  ANTHROPIC_API_KEY
-  Value: your key from console.anthropic.com/settings/keys
+
+  Choose ONE provider (the workflow auto-detects whichever secrets are present):
+
+  OPTION A — Anthropic Claude (recommended)
+    ANTHROPIC_API_KEY      your key from console.anthropic.com/settings/keys
+
+  OPTION B — Azure OpenAI
+    AZURE_OPENAI_API_KEY       your key from the Azure portal
+    AZURE_OPENAI_ENDPOINT      e.g. https://my-resource.openai.azure.com
+    AZURE_OPENAI_DEPLOYMENT    your deployment name, e.g. gpt-4o
+    AZURE_OPENAI_API_VERSION   (optional) defaults to 2024-08-01-preview
+
+  OPTION C — OpenAI
+    OPENAI_API_KEY         your key from platform.openai.com
+    OPENAI_MODEL           (optional) defaults to gpt-4o
+
+  Auto-detection order: Anthropic → Azure OpenAI → OpenAI (first found wins)
 
 Step 3: Allow Actions to push back to main.
   GitHub repo → Settings → Actions → General → Workflow permissions
