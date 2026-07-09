@@ -1,0 +1,4 @@
+# Aider configuration — https://aider.chat/docs/config/aider_conf.html
+# Load the shared agent instructions into every Aider session (read-only).
+read:
+  - AGENTS.md
