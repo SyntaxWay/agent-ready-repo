@@ -1,0 +1,44 @@
+# markdownlint-cli2 configuration
+# https://github.com/DavidAnson/markdownlint-cli2#configuration
+
+# CONVERT.md and .claude/commands/migrate.md are prompt documents — they embed
+# example markdown templates (indented headings, YAML frontmatter, etc.) that
+# markdownlint interprets as real markdown. Exclude them from linting.
+ignores:
+  - "CONVERT.md"
+  - ".claude/commands/**"
+
+config:
+  default: true
+
+  # Line length — disabled; pointer files and docs intentionally have long
+  # description lines that would need artificial wrapping to pass.
+  MD013: false
+
+  # Bare URLs — disabled; config file comments (e.g. aider.conf.yml URL)
+  # and localhost references appear in several files.
+  MD034: false
+
+  # Multiple top-level headings — disabled; some template files contain
+  # embedded doc examples that each start with their own H1.
+  MD025: false
+
+  # Inline HTML — allowed.
+  MD033: false
+
+  # First line must be a heading — disabled; .windsurf/rules/agents.md and
+  # similar files start with YAML frontmatter (--- trigger: always_on ---).
+  MD041: false
+
+  # Duplicate headings — siblings with the same heading are fine.
+  MD024:
+    siblings_only: true
+
+  # Code block style — allow mixed fenced/indented.
+  MD046: false
+
+  # Fenced code block language — not required.
+  MD040: false
+
+  # Blank lines around code fences — not enforced.
+  MD031: false

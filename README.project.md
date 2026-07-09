@@ -13,7 +13,7 @@ cp apps/api/.env.example apps/api/.env   # fill in values — see docs/guides/en
 pnpm dev
 ```
 
-Open http://localhost:3000
+Open <http://localhost:3000>
 
 ## What's in this repo
 

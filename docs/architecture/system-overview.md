@@ -22,6 +22,7 @@ graph LR
 Describe the 1-3 most important flows in numbered steps. Example:
 
 **User signs up:**
+
 1. `apps/web` posts to `POST /v1/auth/signup`
 2. `apps/api` validates via `packages/core/validation`, creates `User` row
 3. A `user.created` event is enqueued; `apps/worker` sends the welcome email
