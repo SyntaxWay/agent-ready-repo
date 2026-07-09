@@ -1,0 +1,143 @@
+name: Docs Guard
+
+# Runs on every PR. Warns (does not block) when non-doc files change
+# without a corresponding update to AGENTS.md or docs/.
+#
+# Philosophy: "agent mistakes are doc bugs." If the AI keeps doing the
+# wrong thing, the fix is a line in AGENTS.md — not a longer prompt.
+# This guard surfaces forgotten doc updates before they merge.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    name: Docs in sync with code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect undocumented changes
+        id: detect
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          all_changed=$(git diff --name-only "$BASE...$HEAD")
+
+          # Non-doc files: anything that isn't markdown, txt, rst, or a
+          # known doc path. These changes may require AGENTS.md / docs/ updates.
+          non_doc=$(echo "$all_changed" | grep -vE \
+            '^(docs/|AGENTS\.md$|README|CONTRIBUTING|CHANGELOG|LICENSE|\.github/PULL_REQUEST_TEMPLATE)' \
+            | grep -vE '\.(md|txt|rst)$' \
+            | grep -v '^$' || true)
+
+          # Doc files: AGENTS.md itself or anything under docs/
+          doc_updates=$(echo "$all_changed" | grep -E '^(docs/|AGENTS\.md$)' || true)
+
+          echo "non_doc<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$non_doc" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          echo "doc_updates<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$doc_updates" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "$non_doc" && -z "$doc_updates" ]]; then
+            echo "needs_doc_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_doc_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment on PR if docs need updating
+        if: steps.detect.outputs.needs_doc_update == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const changedFiles = `${{ steps.detect.outputs.non_doc }}`
+              .trim()
+              .split('\n')
+              .filter(Boolean)
+              .map(f => `  - \`${f}\``)
+              .join('\n');
+
+            const body = `### Docs may be out of sync
+
+            This PR changes non-documentation files without updating \`AGENTS.md\` or \`docs/\`.
+
+            **Changed files:**
+            ${changedFiles}
+
+            If any of the following changed, update the relevant doc before merging:
+
+            | What changed | Where to update |
+            |---|---|
+            | Commands, rules, hard limits | \`AGENTS.md\` §3–§5 |
+            | Repo structure, new app/package | \`AGENTS.md\` §2 + \`docs/architecture/\` |
+            | How to do a common task | \`docs/guides/\` |
+            | Domain terms or invariants | \`docs/GLOSSARY.md\` |
+            | A major architectural decision | \`docs/decisions/\` (new ADR) |
+
+            **If no doc update is needed** (pure refactor, dependency bump, CI tweak), add the label \`skip-docs-check\` or leave a comment explaining why.
+
+            > _This check exists because agent mistakes are usually doc bugs. If an AI keeps doing the wrong thing in this repo, the fix is a line in AGENTS.md._`;
+
+            // Only post if no existing docs-guard comment (avoid spam on re-push)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('Docs may be out of sync')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Resolve docs-guard comment when docs are updated
+        if: steps.detect.outputs.needs_doc_update == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('Docs may be out of sync')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: existing.body + '\n\n---\n**Resolved** — docs were updated in a subsequent push.',
+              });
+            }

@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 1: repo structure — required files exist, pointer files are wired
+  # ─────────────────────────────────────────────────────────────────────
+  structure:
+    name: Validate structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required files present
+        run: |
+          required=(
+            "AGENTS.md"
+            "README.md"
+            "CONTRIBUTING.md"
+            ".gitignore"
+          )
+          failed=0
+          for f in "${required[@]}"; do
+            if [[ -f "$f" ]]; then
+              echo "✓  $f"
+            else
+              echo "::error file=$f::Required file missing: $f"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Pointer files reference AGENTS.md
+        # Every tool-specific file must redirect to AGENTS.md.
+        # If a pointer file exists but doesn't mention AGENTS.md it has
+        # drifted and will silently mislead the agent that reads it.
+        run: |
+          pointers=(
+            "CLAUDE.md"
+            "GEMINI.md"
+            ".clinerules"
+            ".github/copilot-instructions.md"
+            ".cursor/rules/agents.mdc"
+            ".windsurf/rules/agents.md"
+          )
+          failed=0
+          for f in "${pointers[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              continue  # tool not in use — skip
+            fi
+            if grep -q "AGENTS.md" "$f"; then
+              echo "✓  $f"
+            else
+              echo "::error file=$f::$f exists but does not reference AGENTS.md — it will mislead agents"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: AGENTS.md has all required sections
+        run: |
+          sections=(
+            "## 1\."
+            "## 2\."
+            "## 3\."
+            "## 4\."
+            "## 5\."
+            "## 6\."
+            "## 7\."
+            "## 8\."
+            "## 9\."
+            "## 10\."
+          )
+          failed=0
+          for pattern in "${sections[@]}"; do
+            if grep -qE "$pattern" AGENTS.md; then
+              echo "✓  $pattern"
+            else
+              echo "::error file=AGENTS.md::AGENTS.md is missing section matching: $pattern"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 2: syntax — JSON and YAML files are well-formed
+  # ─────────────────────────────────────────────────────────────────────
+  syntax:
+    name: Validate syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON files
+        run: |
+          failed=0
+          while IFS= read -r -d '' f; do
+            if jq empty "$f" 2>/dev/null; then
+              echo "✓  $f"
+            else
+              echo "::error file=$f::Invalid JSON: $f"
+              failed=1
+            fi
+          done < <(find . -name "*.json" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" \
+            -print0)
+          exit "$failed"
+
+      - name: Validate YAML files
+        run: |
+          pip install --quiet pyyaml
+          failed=0
+          while IFS= read -r -d '' f; do
+            if python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" "$f" 2>/dev/null; then
+              echo "✓  $f"
+            else
+              echo "::error file=$f::Invalid YAML: $f"
+              failed=1
+            fi
+          done < <(find . \( -name "*.yml" -o -name "*.yaml" \) \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" \
+            -print0)
+          exit "$failed"
+
+      - name: Validate .claude/settings.json hook structure
+        # The Stop hook must be present and correctly nested — a malformed
+        # settings.json silently disables ALL hooks with no error message.
+        run: |
+          f=".claude/settings.json"
+          if [[ ! -f "$f" ]]; then
+            echo "No $f — skipping hook validation."
+            exit 0
+          fi
+          result=$(jq -r '
+            .hooks.Stop[]?.hooks[]?
+            | select(.type == "command")
+            | .command
+          ' "$f")
+          if [[ -n "$result" ]]; then
+            echo "✓  Stop hook found in $f"
+          else
+            echo "::warning file=$f::$f has no Stop hook. Doc-sync automation will not run."
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 3: markdown — lint all .md files
+  # ─────────────────────────────────────────────────────────────────────
+  markdown:
+    name: Lint markdown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            **/*.md
+            !node_modules/**
+            !**/node_modules/**
