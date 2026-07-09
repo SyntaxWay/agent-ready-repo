@@ -53,10 +53,24 @@ The structure maps each failure mode to a fix:
 
 ## Getting started
 
+### New project
+
 1. Click **Use this template** on GitHub (or clone this repo).
 2. Follow the checklist in [TEMPLATE-GUIDE.md](./TEMPLATE-GUIDE.md): fill in placeholders, replace this README with `README.project.md`, write your glossary and first ADRs.
 3. Delete `TEMPLATE-GUIDE.md` and the example app/package.
 4. Point your favorite agent at the repo and start building.
+
+### Convert an existing repo
+
+Open your existing repo in any AI coding tool and paste the conversion prompt from [CONVERT.md](./CONVERT.md). The prompt will:
+
+1. Scan your repo and detect which AI tools you already use (Claude Code, Cursor, Codex, Gemini, Copilot, Windsurf, Cline, Aider…)
+2. Ask you to confirm the final tool list
+3. Create `AGENTS.md` from your existing README, package files, and CI config
+4. Write only the pointer files for the tools you kept, and delete the rest
+5. Scaffold any missing `docs/` structure
+
+**Claude Code users** can skip the copy-paste and run `/migrate` directly.
 
 ## Principles
 
