@@ -207,6 +207,10 @@ Codex / Amp / OpenCode / Jules — NO pointer file needed. They read AGENTS.md n
 PHASE 5 — CREATE DOCS STRUCTURE
 ─────────────────────────────────────────────
 
+IMPORTANT: Re-read this file (.claude/commands/migrate.md) now to ensure you have
+the full file list below — long Phase 1-4 runs can compress it out of context.
+You MUST create every missing file in this phase. Do NOT list them as "next steps."
+
 Check which of these exist. Create any that are MISSING.
 If a file exists with real content, leave it alone.
 If a file exists as an empty placeholder, update it from Phase 1 facts.

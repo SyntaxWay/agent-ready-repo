@@ -79,6 +79,9 @@ Wait for my reply before doing anything else.
 PHASE 3 — CREATE / REWRITE AGENTS.md
 ─────────────────────────────────────────────
 
+IMPORTANT: Re-read your initial prompt message now to ensure you have the full
+template below — long Phase 1/2 conversations can compress it out of context.
+
 Using the facts from Phase 1, write AGENTS.md at the repo root.
 If one already exists, rewrite it — don't merge stale content.
 Use this exact structure (keep all 10 sections, fill every placeholder):
@@ -214,6 +217,10 @@ Codex / Amp / OpenCode / Jules — NO pointer file needed. They read AGENTS.md n
 ─────────────────────────────────────────────
 PHASE 5 — CREATE DOCS STRUCTURE
 ─────────────────────────────────────────────
+
+IMPORTANT: Re-read your initial prompt message now to ensure you have the full
+file list below — long Phase 1-4 runs can compress it out of context.
+You MUST create every missing file in this phase. Do NOT list them as "next steps."
 
 Check which of these exist. Create any that are MISSING.
 If a file exists and has real content, leave it alone.
