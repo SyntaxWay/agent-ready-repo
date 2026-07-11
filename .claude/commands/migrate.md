@@ -68,6 +68,9 @@ Wait for the user's reply before doing anything else.
 PHASE 3 — CREATE / REWRITE AGENTS.md
 ─────────────────────────────────────────────
 
+IMPORTANT: Re-read this file (.claude/commands/migrate.md) now to ensure you have
+the full template below — long Phase 1/2 conversations can compress it out of context.
+
 Using the facts from Phase 1, write AGENTS.md at the repo root.
 If one already exists, rewrite it — don't merge stale content.
 Use this exact structure (keep all 10 sections, fill every placeholder):
